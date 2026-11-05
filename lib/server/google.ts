@@ -31,7 +31,10 @@ export async function getAccessToken(): Promise<string> {
   try {
     signature = b64url(createSign("RSA-SHA256").update(`${header}.${claims}`).sign(cfg.privateKey));
   } catch {
-    throw new AppError(500, "GOOGLE_PRIVATE_KEY could not be read. Make sure you copied the complete private key.");
+    throw new AppError(
+      500,
+      "GOOGLE_PRIVATE_KEY could not be read: some characters are missing or changed. Copy the private_key value from the service account JSON file again (everything between the quotes) and paste it as the value.",
+    );
   }
 
   let res: Response;

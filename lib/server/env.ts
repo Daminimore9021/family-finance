@@ -36,18 +36,28 @@ export function assertEnv(): void {
  * with literal "\n" sequences, real newlines, or wrapped in quotes.
  */
 export function getPrivateKey(): string {
-  let key = (process.env.GOOGLE_PRIVATE_KEY ?? "").trim();
-  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-    key = key.slice(1, -1);
-  }
-  key = key.replace(/\\n/g, "\n").replace(/\r/g, "");
-  if (!key.includes("PRIVATE KEY")) {
+  return normalizePrivateKey(process.env.GOOGLE_PRIVATE_KEY ?? "");
+}
+
+/**
+ * Rebuilds a clean PEM key from however it was pasted: with literal "\n",
+ * real newlines, spaces instead of newlines (common in hosting dashboards),
+ * surrounding/stray quotes, a trailing comma, or the whole `"private_key": "…"` line.
+ */
+export function normalizePrivateKey(raw: string): string {
+  const text = raw.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n").replace(/\r/g, "");
+  const match = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/.exec(text);
+  if (!match) {
     throw new AppError(
       500,
-      "GOOGLE_PRIVATE_KEY looks invalid. Copy the full private_key value (including BEGIN/END lines) from the service account JSON file.",
+      "GOOGLE_PRIVATE_KEY looks invalid. Copy the full private_key value from the service account JSON file, including the -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY----- lines.",
     );
   }
-  return key;
+  const body = match[1].replace(/[^A-Za-z0-9+/=]/g, "");
+  if (body.length < 800) {
+    throw new AppError(500, "GOOGLE_PRIVATE_KEY looks incomplete (too short). Copy the whole private_key value again.");
+  }
+  return `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
 }
 
 /** Service-account credentials only (no spreadsheet needed). */
