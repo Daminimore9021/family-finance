@@ -26,7 +26,7 @@ export const INCOME_SCHEMA: TableSchema = {
 export const TRANSACTION_SCHEMA: TableSchema = {
   title: "Transactions",
   idColumn: "transaction_id",
-  headers: ["transaction_id", "date", "recipient", "amount", "description", "reason", "notes", "created_at", "updated_at"],
+  headers: ["transaction_id", "date", "recipient", "amount", "description", "reason", "notes", "created_at", "updated_at", "time"],
 };
 
 export const SETTINGS_SCHEMA: TableSchema = {
@@ -93,6 +93,24 @@ function rowToIncome(r: RawRecord): Income | null {
   };
 }
 
+/** Sheet time cell -> HH:MM (24h), or "". Handles "14:05", "2:05 PM" and day-fraction numbers. */
+export function parseTimeCell(v: Cell | undefined): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (typeof v === "number" && v >= 0 && v < 1) {
+    const mins = Math.round(v * 24 * 60) % (24 * 60);
+    return `${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`;
+  }
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]\.?m\.?)?$/i.exec(str(v));
+  if (!m) return "";
+  let h = Number(m[1]);
+  const min = Number(m[2]);
+  if (m[3]) {
+    if (h < 1 || h > 12) return "";
+    h = (h % 12) + (m[3][0].toLowerCase() === "p" ? 12 : 0);
+  }
+  return h <= 23 && min <= 59 ? `${pad(h)}:${pad(min)}` : "";
+}
+
 function rowToTransaction(r: RawRecord): Transaction | null {
   const date = parseDateCell(r.date);
   const amount = num(r.amount);
@@ -107,6 +125,7 @@ function rowToTransaction(r: RawRecord): Transaction | null {
   return {
     id: str(r.transaction_id),
     date,
+    time: parseTimeCell(r.time),
     recipient,
     amount,
     description: str(r.description),
@@ -202,12 +221,13 @@ export async function listTransactions(): Promise<Transaction[]> {
   return table.rows
     .map((r) => rowToTransaction(r.record))
     .filter((x): x is Transaction => x !== null)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time) || b.createdAt.localeCompare(a.createdAt));
 }
 
 function transactionRecord(input: TransactionInput): RawRecord {
   return {
     date: input.date,
+    time: input.time,
     recipient: input.recipient,
     amount: input.amount,
     description: input.description,

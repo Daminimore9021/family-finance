@@ -8,6 +8,7 @@ import { ApiError, cn } from "@/lib/api-client";
 import { validateTransactionInput } from "@/lib/validation";
 import type { Recipient, Transaction } from "@/lib/types";
 import { useData } from "./DataProvider";
+import { DatePicker, TimePicker } from "./ui/DateTimePicker";
 import { Button, Input, Textarea } from "./ui/primitives";
 import { useToast } from "./ui/Toast";
 
@@ -21,6 +22,7 @@ interface FormState {
   recipient: Recipient | "";
   amount: string;
   date: string;
+  time: string;
   description: string;
   reason: string;
   notes: string;
@@ -32,11 +34,12 @@ function initialState(existing?: Transaction): FormState {
         recipient: existing.recipient,
         amount: String(existing.amount),
         date: existing.date,
+        time: existing.time,
         description: existing.description,
         reason: existing.reason,
         notes: existing.notes,
       }
-    : { recipient: "", amount: "", date: todayISO(), description: "", reason: "", notes: "" };
+    : { recipient: "", amount: "", date: todayISO(), time: "", description: "", reason: "", notes: "" };
 }
 
 export function PaymentForm({ existing, onSaved, onCancel }: Props) {
@@ -104,8 +107,7 @@ export function PaymentForm({ existing, onSaved, onCancel }: Props) {
         {errors.recipient && <p className="mt-1.5 text-xs text-rose-600">{errors.recipient}</p>}
       </fieldset>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Input
+      <Input
           label="Amount"
           required
           prefix="₹"
@@ -116,14 +118,10 @@ export function PaymentForm({ existing, onSaved, onCancel }: Props) {
           onChange={(e) => set("amount", e.target.value.replace(/[^\d.]/g, ""))}
           error={errors.amount}
         />
-        <Input
-          label="Payment date"
-          required
-          type="date"
-          value={form.date}
-          onChange={(e) => set("date", e.target.value)}
-          error={errors.date}
-        />
+
+      <div className="grid grid-cols-2 gap-3">
+        <DatePicker label="Payment date" required value={form.date} onChange={(v) => set("date", v)} error={errors.date} />
+        <TimePicker label="Time" optional value={form.time} onChange={(v) => set("time", v)} error={errors.time} />
       </div>
 
       <Input

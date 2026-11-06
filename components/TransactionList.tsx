@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
-import { formatDate, formatINR } from "@/lib/format";
+import { formatDate, formatINR, formatTime } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 import { useData } from "./DataProvider";
 import { PaymentForm } from "./PaymentForm";
@@ -77,6 +77,7 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
               </div>
               <p className="mt-0.5 truncate text-xs text-slate-500">
                 {t.recipient} · {formatDate(t.date)}
+                {t.time ? `, ${formatTime(t.time)}` : ""}
                 {t.reason && t.description ? ` · ${t.reason}` : ""}
               </p>
               {t.notes && <p className="mt-0.5 line-clamp-2 break-words text-xs text-slate-400">{t.notes}</p>}
@@ -103,7 +104,10 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
             <tbody className="divide-y divide-slate-50">
               {transactions.map((t) => (
                 <tr key={t.id} className="align-top hover:bg-slate-50/60">
-                  <td className="py-3 pr-3 text-slate-600">{formatDate(t.date)}</td>
+                  <td className="py-3 pr-3 text-slate-600">
+                    {formatDate(t.date)}
+                    {t.time && <span className="block text-xs text-slate-400">{formatTime(t.time)}</span>}
+                  </td>
                   <td className="py-3 pr-3">
                     <RecipientBadge recipient={t.recipient} />
                   </td>

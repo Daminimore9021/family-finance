@@ -67,3 +67,11 @@ export function shiftMonth(year: number, month: number, delta: number): { year: 
   const index = year * 12 + (month - 1) + delta;
   return { year: Math.floor(index / 12), month: (index % 12) + 1 };
 }
+
+/** "09:05" (24h) -> "9:05 AM". Returns "" for an empty or invalid value. */
+export function formatTime(hhmm: string): string {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
+  if (!m) return "";
+  const h = Number(m[1]);
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h >= 12 ? "PM" : "AM"}`;
+}

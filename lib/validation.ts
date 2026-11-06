@@ -52,6 +52,11 @@ export function isValidISODate(value: string): boolean {
   return d <= daysInMonth;
 }
 
+/** 24-hour HH:MM. */
+export function isValidTime(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
 export function validateIncomeInput(body: unknown): ValidationResult<IncomeInput> {
   const fields: Record<string, string> = {};
   const b = (body ?? {}) as Record<string, unknown>;
@@ -80,6 +85,9 @@ export function validateTransactionInput(body: unknown): ValidationResult<Transa
   const date = asTrimmedString(b.date);
   if (!isValidISODate(date)) fields.date = "Enter a valid date";
 
+  const time = asTrimmedString(b.time);
+  if (time && !isValidTime(time)) fields.time = "Enter a valid time";
+
   const amount = validateAmount(b.amount, fields);
   const description = validateText(b.description, "description", fields);
   const reason = validateText(b.reason, "reason", fields);
@@ -88,7 +96,7 @@ export function validateTransactionInput(body: unknown): ValidationResult<Transa
   if (Object.keys(fields).length) return { ok: false, fields };
   return {
     ok: true,
-    data: { recipient: recipient as TransactionInput["recipient"], date, amount, description, reason, notes },
+    data: { recipient: recipient as TransactionInput["recipient"], date, time, amount, description, reason, notes },
   };
 }
 

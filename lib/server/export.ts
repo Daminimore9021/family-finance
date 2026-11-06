@@ -7,6 +7,7 @@ import {
   dateParts,
   filterTransactions,
 } from "@/lib/calculations";
+import { formatTime } from "@/lib/format";
 import type { Income, Recipient, Transaction } from "@/lib/types";
 
 export type ExportType = "month" | "year" | "income" | "full";
@@ -40,6 +41,7 @@ interface Report {
 
 const TX_COLUMNS: Section["columns"] = [
   { header: "Date", width: 14, date: true },
+  { header: "Time", width: 10 },
   { header: "Recipient", width: 12 },
   { header: "Amount (INR)", width: 16, money: true },
   { header: "Description", width: 32 },
@@ -71,11 +73,11 @@ function isoToDate(iso: string): Date {
 }
 
 function txRows(txs: Transaction[]): CellValue[][] {
-  return txs.map((t) => [isoToDate(t.date), t.recipient, t.amount, t.description, t.reason, t.notes]);
+  return txs.map((t) => [isoToDate(t.date), formatTime(t.time), t.recipient, t.amount, t.description, t.reason, t.notes]);
 }
 
 function txTotal(txs: Transaction[]): CellValue[] {
-  return ["Total", `${txs.length} payments`, txs.reduce((a, t) => a + Math.round(t.amount * 100), 0) / 100, "", "", ""];
+  return ["Total", "", `${txs.length} payments`, txs.reduce((a, t) => a + Math.round(t.amount * 100), 0) / 100, "", "", ""];
 }
 
 function summaryRows(

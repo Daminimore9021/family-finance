@@ -17,6 +17,8 @@ export interface Transaction {
   id: string;
   /** ISO calendar date, YYYY-MM-DD */
   date: string;
+  /** 24-hour HH:MM, or "" when no time was recorded */
+  time: string;
   recipient: Recipient;
   amount: number;
   description: string;
@@ -35,6 +37,8 @@ export interface IncomeInput {
 
 export interface TransactionInput {
   date: string;
+  /** 24-hour HH:MM, or "" */
+  time: string;
   recipient: Recipient;
   amount: number;
   description: string;
