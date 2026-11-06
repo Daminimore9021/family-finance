@@ -65,7 +65,7 @@ function IncomeContent() {
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)] lg:items-start">
       <Card>
-        <CardTitle>Add monthly income</CardTitle>
+        <CardTitle>Add income</CardTitle>
         <IncomeForm key={`${defaultPeriod.year}-${defaultPeriod.month}`} defaultPeriod={defaultPeriod} onEditExisting={setEditing} />
       </Card>
 

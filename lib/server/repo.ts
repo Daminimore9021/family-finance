@@ -3,7 +3,7 @@ import { MONTH_NAMES } from "@/lib/constants";
 import { isRecipient } from "@/lib/calculations";
 import { isValidISODate, parseAmount } from "@/lib/validation";
 import type { Income, IncomeInput, Transaction, TransactionInput } from "@/lib/types";
-import { conflict, notFound } from "./errors";
+import { notFound } from "./errors";
 import {
   appendRecord,
   deleteRecordRow,
@@ -151,18 +151,10 @@ export async function listIncome(): Promise<Income[]> {
     .sort((a, b) => b.year - a.year || b.month - a.month);
 }
 
-function duplicateIncomeError(input: IncomeInput) {
-  const label = `${MONTH_NAMES[input.month - 1]} ${input.year}`;
-  return conflict(`Income for ${label} already exists. Edit the existing entry instead.`, {
-    month: `${label} already has an income entry`,
-  });
-}
-
 export function createIncome(input: IncomeInput): Promise<Income> {
   return withWriteLock(async () => {
+    // A month can have several incomes (salary, freelancing, ...).
     const table = await readTable(INCOME_SCHEMA);
-    const existing = table.rows.map((r) => rowToIncome(r.record)).filter(Boolean) as Income[];
-    if (existing.some((i) => i.year === input.year && i.month === input.month)) throw duplicateIncomeError(input);
 
     const ts = nowIso();
     const income: Income = { id: newId("inc"), ...input, createdAt: ts, updatedAt: ts };
@@ -184,13 +176,6 @@ export function updateIncome(id: string, input: IncomeInput): Promise<Income> {
     const table = await readTable(INCOME_SCHEMA);
     const row = findRow(table, INCOME_SCHEMA, id);
     if (!row) throw notFound("Income entry not found. It may have been deleted.");
-    const clash = table.rows.some((r) => {
-      if (r === row) return false;
-      const i = rowToIncome(r.record);
-      return i !== null && i.year === input.year && i.month === input.month;
-    });
-    if (clash) throw duplicateIncomeError(input);
-
     const ts = nowIso();
     await updateRecord(INCOME_SCHEMA, table.headers, row, {
       month: input.month,

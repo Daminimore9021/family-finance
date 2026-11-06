@@ -71,6 +71,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // Keep figures live: re-read the sheet when the app comes back into view and
+  // every 30 seconds while it is visible (picks up entries made on other devices
+  // or typed straight into the sheet).
+  useEffect(() => {
+    const visible = () => document.visibilityState === "visible";
+    const onShow = () => visible() && void refresh();
+    const timer = window.setInterval(onShow, 30_000);
+    document.addEventListener("visibilitychange", onShow);
+    window.addEventListener("focus", onShow);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onShow);
+      window.removeEventListener("focus", onShow);
+    };
+  }, [refresh]);
+
   const saveIncome = useCallback(
     async (input: IncomeInput, id?: string) => {
       const saved = id

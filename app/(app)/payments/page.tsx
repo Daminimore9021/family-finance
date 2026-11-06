@@ -36,7 +36,7 @@ const ctrl =
 
 function PaymentsContent() {
   const { transactions, period } = useData();
-  const [monthFilter, setMonthFilter] = useState(`${period.year}-${String(period.month).padStart(2, "0")}`);
+  const [monthFilter, setMonthFilter] = useState("all");
   const [recipient, setRecipient] = useState<Recipient | "all">("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortOrder>("date_desc");

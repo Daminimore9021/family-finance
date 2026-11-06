@@ -45,8 +45,11 @@ export function isInYear(tx: Transaction, year: number): boolean {
   return dateParts(tx.date).year === year;
 }
 
-export function findIncome(incomes: Income[], year: number, month: number): Income | null {
-  return incomes.find((i) => i.year === year && i.month === month) ?? null;
+/** Every income entry for a month (e.g. salary and freelancing), oldest first. */
+export function incomesForMonth(incomes: Income[], year: number, month: number): Income[] {
+  return incomes
+    .filter((i) => i.year === year && i.month === month)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function recipientTotals(transactions: Transaction[]): RecipientTotals {
@@ -64,18 +67,18 @@ export function computeMonthlySummary(
   year: number,
   month: number,
 ): MonthlySummary {
-  const incomeRecord = findIncome(incomes, year, month);
+  const incomeRecords = incomesForMonth(incomes, year, month);
   const monthTx = transactions.filter((t) => isInMonth(t, year, month));
   const totals = recipientTotals(monthTx);
   const totalGiven = sumAmounts(RECIPIENTS.map((r) => totals[r]));
-  const income = incomeRecord?.amount ?? 0;
+  const income = sumAmounts(incomeRecords.map((i) => i.amount));
   const remaining = fromPaise(toPaise(income) - toPaise(totalGiven));
   return {
     year,
     month,
     income,
-    hasIncome: incomeRecord !== null,
-    incomeRecord,
+    hasIncome: incomeRecords.length > 0,
+    incomeRecords,
     totals,
     totalGiven,
     remaining,

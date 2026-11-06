@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRight, HandCoins, Plus, Receipt, RefreshCw, TrendingDown, Wallet, PiggyBank } from "lucide-react";
 import { useData } from "@/components/DataProvider";
 import { LoadState } from "@/components/LoadState";
@@ -11,8 +11,14 @@ import { RecipientAvatar } from "@/components/RecipientAvatar";
 import { TransactionList } from "@/components/TransactionList";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { RECIPIENTS, RECIPIENT_META, MONTH_SHORT } from "@/lib/constants";
-import { availableYears, computeMonthlySummary, filterTransactions, trailingMonths } from "@/lib/calculations";
-import { formatINR, monthLabel } from "@/lib/format";
+import {
+  availableYears,
+  computeAllTimeSummary,
+  computeMonthlySummary,
+  filterTransactions,
+  trailingMonths,
+} from "@/lib/calculations";
+import { currentYearMonth, formatINR, monthLabel } from "@/lib/format";
 import { cn } from "@/lib/api-client";
 
 export default function DashboardPage() {
@@ -47,30 +53,90 @@ function DashboardHeader() {
   );
 }
 
+type Scope = "all" | "month";
+const SCOPE_KEY = "fft.dashScope";
+
 function Dashboard() {
   const { incomes, transactions, period, setPeriod } = useData();
   const { year, month } = period;
 
-  const summary = useMemo(() => computeMonthlySummary(incomes, transactions, year, month), [incomes, transactions, year, month]);
-  const recent = useMemo(() => filterTransactions(transactions, { year, month, sort: "date_desc" }).slice(0, 5), [transactions, year, month]);
+  // "All time" by default so the cards always reflect every record in the sheet.
+  const [scope, setScopeState] = useState<Scope>("all");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(SCOPE_KEY) === "month") setScopeState("month");
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+  const setScope = (s: Scope) => {
+    setScopeState(s);
+    try {
+      localStorage.setItem(SCOPE_KEY, s);
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  const allTime = scope === "all";
+
+  const summary = useMemo(() => {
+    if (!allTime) return computeMonthlySummary(incomes, transactions, year, month);
+    const a = computeAllTimeSummary(incomes, transactions);
+    return {
+      income: a.totalIncome,
+      hasIncome: a.incomeCount > 0,
+      totals: a.totals,
+      totalGiven: a.totalGiven,
+      remaining: a.remaining,
+      transactionCount: a.transactionCount,
+      isOverspent: a.remaining < 0,
+    };
+  }, [allTime, incomes, transactions, year, month]);
+  const recent = useMemo(
+    () => filterTransactions(transactions, allTime ? { sort: "date_desc" } : { year, month, sort: "date_desc" }).slice(0, 5),
+    [allTime, transactions, year, month],
+  );
   const years = useMemo(() => pickerYears(availableYears(incomes, transactions, year)), [incomes, transactions, year]);
+  const trendEnd = allTime ? currentYearMonth() : { year, month };
   const trend = useMemo(
     () =>
-      trailingMonths(year, month, 6).map((p) => {
+      trailingMonths(trendEnd.year, trendEnd.month, 6).map((p) => {
         const s = computeMonthlySummary(incomes, transactions, p.year, p.month);
         return { label: MONTH_SHORT[p.month - 1], income: s.income, given: s.totalGiven };
       }),
-    [incomes, transactions, year, month],
+    [incomes, transactions, trendEnd.year, trendEnd.month],
   );
 
-  const label = monthLabel(year, month);
+  const label = allTime ? "all time" : monthLabel(year, month);
   const usedPct = summary.income > 0 ? Math.round((summary.totalGiven / summary.income) * 100) : null;
 
   return (
     <div className="space-y-4">
-      <MonthSwitcher year={year} month={month} years={years} onChange={setPeriod} />
+      <div className="flex rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100" role="tablist" aria-label="Dashboard period">
+        {(
+          [
+            ["all", "All time"],
+            ["month", "Monthly"],
+          ] as const
+        ).map(([key, text]) => (
+          <button
+            key={key}
+            role="tab"
+            aria-selected={scope === key}
+            onClick={() => setScope(key)}
+            className={cn(
+              "h-10 flex-1 rounded-xl text-sm font-semibold transition-colors",
+              scope === key ? "bg-brand-600 text-white shadow-sm" : "text-slate-500 hover:text-brand-700",
+            )}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
 
-      {!summary.hasIncome && (
+      {!allTime && <MonthSwitcher year={year} month={month} years={years} onChange={setPeriod} />}
+
+      {!allTime && !summary.hasIncome && (
         <Card className="flex items-center gap-3 bg-brand-50/60 ring-brand-100">
           <Wallet className="size-5 shrink-0 text-brand-600" aria-hidden />
           <p className="min-w-0 flex-1 text-sm text-slate-700">No income added for {label} yet.</p>
@@ -87,14 +153,20 @@ function Dashboard() {
         <div role="alert" className="flex gap-3 rounded-2xl bg-rose-50 p-4 text-sm text-rose-800 ring-1 ring-rose-200">
           <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
           <p>
-            You have given <strong className="num">{formatINR(Math.abs(summary.remaining))}</strong> more than your income in {label}.
+            You have given <strong className="num">{formatINR(Math.abs(summary.remaining))}</strong> more than your income {allTime ? "overall" : `in ${label}`}.
           </p>
         </div>
       )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon={Wallet} label="Monthly income" value={formatINR(summary.income)} hint={summary.hasIncome ? label : "Not added"} tone="brand" />
+        <StatCard
+          icon={Wallet}
+          label={allTime ? "Total income" : "Monthly income"}
+          value={formatINR(summary.income)}
+          hint={allTime ? `${incomes.length} income entries` : summary.hasIncome ? label : "Not added"}
+          tone="brand"
+        />
         <StatCard
           icon={HandCoins}
           label="Given to family"
@@ -109,13 +181,13 @@ function Dashboard() {
           hint={summary.isOverspent ? "Over budget" : "Income − payments"}
           tone={summary.isOverspent ? "danger" : "success"}
         />
-        <StatCard icon={Receipt} label="Transactions" value={String(summary.transactionCount)} hint={`in ${MONTH_SHORT[month - 1]} ${year}`} tone="slate" />
+        <StatCard icon={Receipt} label="Transactions" value={String(summary.transactionCount)} hint={allTime ? "all time" : `in ${MONTH_SHORT[month - 1]} ${year}`} tone="slate" />
       </div>
 
       {/* Person-wise breakdown */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardTitle>Given to each person</CardTitle>
+          <CardTitle>Given to each person · {allTime ? "all time" : label}</CardTitle>
           <ul className="space-y-4">
             {RECIPIENTS.map((r) => {
               const v = summary.totals[r];
@@ -147,7 +219,7 @@ function Dashboard() {
       </div>
 
       <Card>
-        <CardTitle>Income vs family payments · last 6 months</CardTitle>
+        <CardTitle>Income vs family payments · last 6 months{allTime ? "" : ` to ${MONTH_SHORT[month - 1]} ${year}`}</CardTitle>
         <IncomeVsGivenChart data={trend} />
       </Card>
 
@@ -166,8 +238,8 @@ function Dashboard() {
         ) : (
           <EmptyState
             icon={Receipt}
-            title={`No payments in ${label}`}
-            description="Payments you record for this month will show here."
+            title={allTime ? "No payments yet" : `No payments in ${label}`}
+            description={allTime ? "Payments you record will show here." : "Payments you record for this month will show here."}
             action={
               <Link
                 href="/payments"

@@ -21,6 +21,7 @@ const tx = (recipient: Recipient, amount: number, date: string, description = ""
   recipient,
   amount,
   date,
+  time: "",
   description,
   reason: "",
   notes: "",
@@ -119,4 +120,12 @@ test("validation", () => {
   assert.ok(t.ok && t.data.description === "" && t.data.reason === "" && t.data.notes === "");
   assert.equal(validateTransactionInput({ recipient: "Mummy", amount: -1, date: "2026-11-05" }).ok, false);
   assert.equal(validateTransactionInput({ recipient: "Sister", amount: 1, date: "2026-11-05" }).ok, false);
+});
+
+test("a month can have several incomes (salary + freelancing) and they add up", () => {
+  const list = [inc(2026, 11, 50000), { ...inc(2026, 11, 12000.5), id: "free" }];
+  const s = computeMonthlySummary(list, [tx("Papa", 2000.5, "2026-11-03")], 2026, 11);
+  assert.equal(s.income, 62000.5);
+  assert.equal(s.incomeRecords.length, 2);
+  assert.equal(s.remaining, 60000);
 });

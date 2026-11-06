@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { Info } from "lucide-react";
 import { LIMITS, MONTH_NAMES } from "@/lib/constants";
-import { findIncome } from "@/lib/calculations";
+import { incomesForMonth, sumAmounts } from "@/lib/calculations";
 import { formatINR, monthLabel } from "@/lib/format";
 import { ApiError, cn } from "@/lib/api-client";
 import { validateIncomeInput } from "@/lib/validation";
@@ -34,15 +34,15 @@ export function IncomeForm({ existing, defaultPeriod, onSaved, onCancel, onEditE
 
   const years = useMemo(() => pickerYears(incomes.map((i) => i.year)), [incomes]);
 
-  // Duplicate detection: another record already uses the chosen month & year.
-  const duplicate = useMemo(() => {
-    const found = findIncome(incomes, Number(year), Number(month));
-    return found && found.id !== existing?.id ? found : null;
-  }, [incomes, year, month, existing?.id]);
+  // Other incomes already recorded for the chosen month. Not a blocker: a month can
+  // have several incomes (salary, freelancing, ...), this just tells the user.
+  const others = useMemo(
+    () => incomesForMonth(incomes, Number(year), Number(month)).filter((i) => i.id !== existing?.id),
+    [incomes, year, month, existing?.id],
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (duplicate) return;
     const result = validateIncomeInput({ month, year, amount, description });
     if (!result.ok) {
       setErrors(result.fields);
@@ -51,7 +51,7 @@ export function IncomeForm({ existing, defaultPeriod, onSaved, onCancel, onEditE
     setSaving(true);
     try {
       const saved = await saveIncome(result.data, existing?.id);
-      toast.success(`${existing ? "Updated" : "Saved"} income for ${monthLabel(saved.year, saved.month)}`);
+      toast.success(`${existing ? "Updated" : "Saved"} ${saved.description || "income"} for ${monthLabel(saved.year, saved.month)}`);
       if (!existing) {
         setAmount("");
         setDescription("");
@@ -85,16 +85,19 @@ export function IncomeForm({ existing, defaultPeriod, onSaved, onCancel, onEditE
         </Select>
       </div>
 
-      {duplicate && (
-        <div className="flex gap-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-800 ring-1 ring-amber-200">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
+      {others.length > 0 && (
+        <div role="status" className="flex gap-3 rounded-xl bg-brand-50 p-3 text-sm text-brand-900 ring-1 ring-brand-100">
+          <Info className="mt-0.5 size-4 shrink-0 text-brand-600" aria-hidden />
           <div className="min-w-0">
             <p>
-              Income for <strong>{monthLabel(duplicate.year, duplicate.month)}</strong> is already recorded (
-              {formatINR(duplicate.amount)}). Each month can have only one income entry.
+              <strong>{monthLabel(Number(year), Number(month))}</strong> already has{" "}
+              {others.length === 1 ? "an income" : `${others.length} incomes`} of{" "}
+              <strong className="num">{formatINR(sumAmounts(others.map((i) => i.amount)))}</strong>
+              {others.some((i) => i.description) && <> ({others.map((i) => i.description).filter(Boolean).join(", ")})</>}.
+              {existing ? "" : " This will be added as another income for the month."}
             </p>
-            {onEditExisting && (
-              <button type="button" className="mt-1 font-semibold underline" onClick={() => onEditExisting(duplicate)}>
+            {onEditExisting && !existing && others.length === 1 && (
+              <button type="button" className="mt-1 font-semibold text-brand-700 underline" onClick={() => onEditExisting(others[0])}>
                 Edit that entry instead
               </button>
             )}
@@ -120,7 +123,7 @@ export function IncomeForm({ existing, defaultPeriod, onSaved, onCancel, onEditE
         label="Description"
         optional
         maxLength={LIMITS.description}
-        placeholder="e.g. Salary + freelance"
+        placeholder="e.g. Salary, Freelancing"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         error={errors.description}
@@ -132,7 +135,7 @@ export function IncomeForm({ existing, defaultPeriod, onSaved, onCancel, onEditE
             Cancel
           </Button>
         )}
-        <Button type="submit" loading={saving} disabled={Boolean(duplicate)}>
+        <Button type="submit" loading={saving}>
           {existing ? "Save changes" : "Save income"}
         </Button>
       </div>

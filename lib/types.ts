@@ -53,7 +53,8 @@ export interface MonthlySummary {
   month: number;
   income: number;
   hasIncome: boolean;
-  incomeRecord: Income | null;
+  /** All income entries for the month; `income` is their sum. */
+  incomeRecords: Income[];
   totals: RecipientTotals;
   totalGiven: number;
   remaining: number;
