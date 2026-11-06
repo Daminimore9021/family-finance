@@ -24,8 +24,40 @@ export interface Transaction {
   description: string;
   reason: string;
   notes: string;
+  /** "gift" (default) or "loan" — a loan is money expected back. */
+  kind: PaymentKind;
+  /** For loans: how much has come back so far. */
+  returnedAmount: number;
+  /** For loans: when the latest return happened (YYYY-MM-DD) or "". */
+  returnedDate: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type PaymentKind = "gift" | "loan";
+export type DueRepeat = "none" | "monthly" | "yearly";
+
+/** A payment that has to be made on a date (LIC, college fee, gas, ...). */
+export interface Due {
+  id: string;
+  title: string;
+  recipient: Recipient;
+  amount: number;
+  /** YYYY-MM-DD */
+  dueDate: string;
+  repeat: DueRepeat;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DueInput {
+  title: string;
+  recipient: Recipient;
+  amount: number;
+  dueDate: string;
+  repeat: DueRepeat;
+  notes: string;
 }
 
 export interface IncomeInput {
@@ -44,6 +76,9 @@ export interface TransactionInput {
   description: string;
   reason: string;
   notes: string;
+  kind: PaymentKind;
+  returnedAmount: number;
+  returnedDate: string;
 }
 
 export type RecipientTotals = Record<Recipient, number>;

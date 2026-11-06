@@ -8,7 +8,7 @@ import { PaymentForm } from "@/components/PaymentForm";
 import { TransactionList } from "@/components/TransactionList";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { RECIPIENTS, RECIPIENT_META, MONTH_NAMES } from "@/lib/constants";
-import { filterTransactions, recipientTotals, sumAmounts } from "@/lib/calculations";
+import { filterTransactions, recipientTotals, sumAmounts, netAmount } from "@/lib/calculations";
 import { formatINR } from "@/lib/format";
 import { cn } from "@/lib/api-client";
 import type { Recipient, SortOrder } from "@/lib/types";
@@ -54,7 +54,7 @@ function PaymentsContent() {
   }, [transactions, monthFilter, recipient, search, sort]);
 
   const totals = useMemo(() => recipientTotals(filtered), [filtered]);
-  const total = useMemo(() => sumAmounts(filtered.map((t) => t.amount)), [filtered]);
+  const total = useMemo(() => sumAmounts(filtered.map(netAmount)), [filtered]);
   const hasFilters = recipient !== "all" || search.trim() !== "";
 
   return (

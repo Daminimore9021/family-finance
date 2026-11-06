@@ -7,6 +7,7 @@
  */
 import { RECIPIENTS } from "./constants";
 import type {
+  DueRepeat,
   Income,
   MonthlySummary,
   Recipient,
@@ -52,10 +53,16 @@ export function incomesForMonth(incomes: Income[], year: number, month: number):
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/** What a payment really cost: for a loan, the part that has not come back. */
+export function netAmount(tx: Pick<Transaction, "amount" | "kind" | "returnedAmount">): number {
+  if (tx.kind !== "loan") return tx.amount;
+  return fromPaise(Math.max(0, toPaise(tx.amount) - toPaise(tx.returnedAmount || 0)));
+}
+
 export function recipientTotals(transactions: Transaction[]): RecipientTotals {
   const paise = emptyTotals();
   for (const tx of transactions) {
-    if (tx.recipient in paise) paise[tx.recipient] += toPaise(tx.amount);
+    if (tx.recipient in paise) paise[tx.recipient] += toPaise(netAmount(tx));
   }
   for (const r of RECIPIENTS) paise[r] = fromPaise(paise[r]);
   return paise;
@@ -167,6 +174,71 @@ export function filterTransactions(transactions: Transaction[], filter: Transact
       return true;
     })
     .sort((a, b) => compareTransactions(a, b, filter.sort));
+}
+
+/* ------------------------------------------------------------------ */
+/* Reasons, loans, dues                                                */
+/* ------------------------------------------------------------------ */
+
+export const NO_REASON = "No reason";
+
+/** Net amount per reason (case-insensitive), biggest first. Blank reasons are grouped. */
+export function reasonBreakdown(transactions: Transaction[]): { label: string; amount: number; count: number }[] {
+  const groups = new Map<string, { label: string; paise: number; count: number }>();
+  for (const t of transactions) {
+    const label = t.reason.trim() || NO_REASON;
+    const key = label.toLowerCase();
+    const g = groups.get(key) ?? { label, paise: 0, count: 0 };
+    g.paise += toPaise(netAmount(t));
+    g.count += 1;
+    groups.set(key, g);
+  }
+  return [...groups.values()]
+    .map((g) => ({ label: g.label, amount: fromPaise(g.paise), count: g.count }))
+    .sort((a, b) => b.amount - a.amount || a.label.localeCompare(b.label));
+}
+
+/** Reasons used at least twice, most frequent first (for quick-pick chips). */
+export function frequentReasons(transactions: Transaction[], limit = 8): string[] {
+  return reasonBreakdown(transactions)
+    .filter((r) => r.label !== NO_REASON && r.count >= 2)
+    .sort((a, b) => b.count - a.count || b.amount - a.amount)
+    .slice(0, limit)
+    .map((r) => r.label);
+}
+
+export function loanSummary(transactions: Transaction[]) {
+  const loans = transactions.filter((t) => t.kind === "loan");
+  const pending = loans.map(netAmount);
+  return {
+    loanCount: loans.length,
+    openCount: pending.filter((p) => p > 0).length,
+    lent: sumAmounts(loans.map((t) => t.amount)),
+    returned: sumAmounts(loans.map((t) => Math.min(t.returnedAmount || 0, t.amount))),
+    pending: sumAmounts(pending),
+  };
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/** Next occurrence of a repeating due. Day is clamped to the month (31 Jan -> 28 Feb). */
+export function nextDueDate(iso: string, repeat: DueRepeat): string {
+  const { year, month, day } = dateParts(iso);
+  if (repeat === "none") return iso;
+  const idx = year * 12 + (month - 1) + (repeat === "monthly" ? 1 : 12);
+  const y = Math.floor(idx / 12);
+  const m = (idx % 12) + 1;
+  const d = Math.min(day, daysInMonth(y, m));
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Whole days from `fromIso` to `toIso` (negative when `toIso` is earlier). */
+export function daysBetween(fromIso: string, toIso: string): number {
+  const a = dateParts(fromIso);
+  const b = dateParts(toIso);
+  return Math.round((Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)) / 86_400_000);
 }
 
 export function isRecipient(value: unknown): value is Recipient {

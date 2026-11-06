@@ -9,6 +9,7 @@ import { MonthSwitcher, pickerYears } from "@/components/MonthSwitcher";
 import { IncomeVsGivenChart, PersonChart } from "@/components/Charts";
 import { RecipientAvatar } from "@/components/RecipientAvatar";
 import { TransactionList } from "@/components/TransactionList";
+import { UpcomingDues } from "@/components/Dues";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { RECIPIENTS, RECIPIENT_META, MONTH_SHORT } from "@/lib/constants";
 import {
@@ -16,6 +17,10 @@ import {
   computeAllTimeSummary,
   computeMonthlySummary,
   filterTransactions,
+  loanSummary,
+  NO_REASON,
+  reasonBreakdown,
+  sumAmounts,
   trailingMonths,
 } from "@/lib/calculations";
 import { currentYearMonth, formatINR, monthLabel } from "@/lib/format";
@@ -96,6 +101,21 @@ function Dashboard() {
     () => filterTransactions(transactions, allTime ? { sort: "date_desc" } : { year, month, sort: "date_desc" }).slice(0, 5),
     [allTime, transactions, year, month],
   );
+  const scopedTx = useMemo(
+    () => (allTime ? transactions : filterTransactions(transactions, { year, month })),
+    [allTime, transactions, year, month],
+  );
+  const reasons = useMemo(() => {
+    // Top named reasons, then "Others", with blank reasons always shown last so they stand out.
+    const all = reasonBreakdown(scopedTx).filter((r) => r.amount > 0);
+    const blank = all.filter((r) => r.label === NO_REASON);
+    const named = all.filter((r) => r.label !== NO_REASON);
+    if (named.length <= 5) return [...named, ...blank];
+    const rest = named.slice(4);
+    const others = { label: "Others", amount: sumAmounts(rest.map((r) => r.amount)), count: rest.reduce((a, r) => a + r.count, 0) };
+    return [...named.slice(0, 4), others, ...blank];
+  }, [scopedTx]);
+  const loans = useMemo(() => loanSummary(transactions), [transactions]);
   const years = useMemo(() => pickerYears(availableYears(incomes, transactions, year)), [incomes, transactions, year]);
   const trendEnd = allTime ? currentYearMonth() : { year, month };
   const trend = useMemo(
@@ -164,7 +184,7 @@ function Dashboard() {
           icon={Wallet}
           label={allTime ? "Total income" : "Monthly income"}
           value={formatINR(summary.income)}
-          hint={allTime ? `${incomes.length} income entries` : summary.hasIncome ? label : "Not added"}
+          hint={allTime ? `${incomes.length} income ${incomes.length === 1 ? "entry" : "entries"}` : summary.hasIncome ? label : "Not added"}
           tone="brand"
         />
         <StatCard
@@ -182,6 +202,62 @@ function Dashboard() {
           tone={summary.isOverspent ? "danger" : "success"}
         />
         <StatCard icon={Receipt} label="Transactions" value={String(summary.transactionCount)} hint={allTime ? "all time" : `in ${MONTH_SHORT[month - 1]} ${year}`} tone="slate" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <UpcomingDues />
+
+        <div className="space-y-4">
+          {loans.loanCount > 0 && (
+            <Card className="ring-amber-100">
+              <CardTitle
+                action={
+                  <Link href="/payments" className="inline-flex min-h-9 items-center gap-1 text-sm font-medium text-brand-600">
+                    View <ArrowRight className="size-4" aria-hidden />
+                  </Link>
+                }
+              >
+                Loans to get back
+              </CardTitle>
+              <p className="num text-2xl font-semibold tracking-tight text-amber-700">{formatINR(loans.pending)}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {loans.openCount} open {loans.openCount === 1 ? "loan" : "loans"} · lent {formatINR(loans.lent)} · returned {formatINR(loans.returned)}
+              </p>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-amber-100">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${loans.lent > 0 ? Math.round((loans.returned / loans.lent) * 100) : 0}%` }}
+                />
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <CardTitle>Where the money went · {allTime ? "all time" : label}</CardTitle>
+            {reasons.length === 0 ? (
+              <p className="text-sm text-slate-500">No payments {allTime ? "yet" : `in ${label}`}.</p>
+            ) : (
+              <ul className="space-y-3">
+                {reasons.map((r) => {
+                  const pct = summary.totalGiven > 0 ? Math.min(100, (r.amount / summary.totalGiven) * 100) : 0;
+                  return (
+                    <li key={r.label}>
+                      <div className="flex items-baseline justify-between gap-2 text-sm">
+                        <span className={cn("min-w-0 truncate font-medium", r.label === NO_REASON ? "text-slate-400" : "text-slate-700")}>
+                          {r.label} <span className="text-xs font-normal text-slate-400">· {r.count}</span>
+                        </span>
+                        <span className="num shrink-0 font-semibold text-slate-900">{formatINR(r.amount)}</span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                        <div className={cn("h-full rounded-full", r.label === NO_REASON ? "bg-slate-300" : "bg-brand-500")} style={{ width: `${pct}%` }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+        </div>
       </div>
 
       {/* Person-wise breakdown */}

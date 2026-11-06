@@ -1,6 +1,6 @@
 import { LIMITS, MAX_AMOUNT, MAX_YEAR, MIN_YEAR } from "./constants";
 import { isRecipient } from "./calculations";
-import type { IncomeInput, TransactionInput } from "./types";
+import type { DueInput, DueRepeat, IncomeInput, PaymentKind, TransactionInput } from "./types";
 
 export type ValidationResult<T> = { ok: true; data: T } | { ok: false; fields: Record<string, string> };
 
@@ -93,11 +93,65 @@ export function validateTransactionInput(body: unknown): ValidationResult<Transa
   const reason = validateText(b.reason, "reason", fields);
   const notes = validateText(b.notes, "notes", fields);
 
+  const kindRaw = asTrimmedString(b.kind) || "gift";
+  if (kindRaw !== "gift" && kindRaw !== "loan") fields.kind = "Choose gift or loan";
+  const kind = kindRaw as PaymentKind;
+
+  let returnedAmount = 0;
+  let returnedDate = "";
+  if (kind === "loan") {
+    const raw = asTrimmedString(b.returnedAmount);
+    const parsed = raw === "" ? 0 : parseAmount(raw);
+    if (parsed === null || parsed < 0) fields.returnedAmount = "Enter a valid amount";
+    else if (parsed > amount && !fields.amount) fields.returnedAmount = "Can't be more than the loan";
+    else returnedAmount = Math.round(parsed * 100) / 100;
+    returnedDate = asTrimmedString(b.returnedDate);
+    if (returnedDate && !isValidISODate(returnedDate)) fields.returnedDate = "Enter a valid date";
+    if (returnedAmount === 0) returnedDate = "";
+  }
+
   if (Object.keys(fields).length) return { ok: false, fields };
   return {
     ok: true,
-    data: { recipient: recipient as TransactionInput["recipient"], date, time, amount, description, reason, notes },
+    data: {
+      recipient: recipient as TransactionInput["recipient"],
+      date,
+      time,
+      amount,
+      description,
+      reason,
+      notes,
+      kind,
+      returnedAmount,
+      returnedDate,
+    },
   };
+}
+
+const REPEATS: DueRepeat[] = ["none", "monthly", "yearly"];
+
+export function validateDueInput(body: unknown): ValidationResult<DueInput> {
+  const fields: Record<string, string> = {};
+  const b = (body ?? {}) as Record<string, unknown>;
+
+  const title = validateText(b.title, "title", fields);
+  if (!title && !fields.title) fields.title = "Enter what this payment is for";
+
+  const recipient = asTrimmedString(b.recipient);
+  if (!isRecipient(recipient)) fields.recipient = "Choose Mummy, Papa or Brother";
+
+  const amount = validateAmount(b.amount, fields);
+
+  const dueDate = asTrimmedString(b.dueDate);
+  if (!isValidISODate(dueDate)) fields.dueDate = "Enter a valid date";
+
+  const repeat = (asTrimmedString(b.repeat) || "none") as DueRepeat;
+  if (!REPEATS.includes(repeat)) fields.repeat = "Choose how often it repeats";
+
+  const notes = validateText(b.notes, "notes", fields);
+
+  if (Object.keys(fields).length) return { ok: false, fields };
+  return { ok: true, data: { title, recipient: recipient as DueInput["recipient"], amount, dueDate, repeat, notes } };
 }
 
 export function isValidPin(pin: unknown): pin is string {

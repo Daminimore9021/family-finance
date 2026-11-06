@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { MONTH_NAMES } from "@/lib/constants";
 import { isRecipient } from "@/lib/calculations";
 import { isValidISODate, parseAmount } from "@/lib/validation";
-import type { Income, IncomeInput, Transaction, TransactionInput } from "@/lib/types";
+import type { Due, DueInput, DueRepeat, Income, IncomeInput, Transaction, TransactionInput } from "@/lib/types";
 import { notFound } from "./errors";
 import {
   appendRecord,
@@ -26,7 +26,14 @@ export const INCOME_SCHEMA: TableSchema = {
 export const TRANSACTION_SCHEMA: TableSchema = {
   title: "Transactions",
   idColumn: "transaction_id",
-  headers: ["transaction_id", "date", "recipient", "amount", "description", "reason", "notes", "created_at", "updated_at", "time"],
+  headers: ["transaction_id", "date", "recipient", "amount", "description", "reason", "notes", "created_at", "updated_at", "time",
+    "kind", "returned_amount", "returned_date"],
+};
+
+export const DUES_SCHEMA: TableSchema = {
+  title: "Dues",
+  idColumn: "due_id",
+  headers: ["due_id", "title", "recipient", "amount", "due_date", "repeat", "notes", "created_at", "updated_at"],
 };
 
 export const SETTINGS_SCHEMA: TableSchema = {
@@ -111,13 +118,17 @@ export function parseTimeCell(v: Cell | undefined): string {
   return h <= 23 && min <= 59 ? `${pad(h)}:${pad(min)}` : "";
 }
 
+// Accept common spellings typed by hand.
+const RECIPIENT_ALIAS: Record<string, string> = { mummy: "Mummy", mother: "Mummy", aai: "Mummy", papa: "Papa", father: "Papa", brother: "Brother", bhai: "Brother" };
+const recipientCell = (v: Cell | undefined) => {
+  const raw = str(v);
+  return RECIPIENT_ALIAS[raw.toLowerCase()] ?? raw;
+};
+
 function rowToTransaction(r: RawRecord): Transaction | null {
   const date = parseDateCell(r.date);
   const amount = num(r.amount);
-  const recipientRaw = str(r.recipient);
-  // Accept common spellings typed by hand.
-  const alias: Record<string, string> = { mummy: "Mummy", mother: "Mummy", papa: "Papa", father: "Papa", brother: "Brother", bhai: "Brother" };
-  const recipient = alias[recipientRaw.toLowerCase()] ?? recipientRaw;
+  const recipient = recipientCell(r.recipient);
   if (!date || amount === null || !isRecipient(recipient)) {
     console.warn("[repo] skipping invalid transaction row", r.transaction_id);
     return null;
@@ -130,6 +141,40 @@ function rowToTransaction(r: RawRecord): Transaction | null {
     amount,
     description: str(r.description),
     reason: str(r.reason),
+    notes: str(r.notes),
+    ...loanFields(r, amount),
+    createdAt: str(r.created_at),
+    updatedAt: str(r.updated_at),
+  };
+}
+
+function loanFields(r: RawRecord, amount: number): Pick<Transaction, "kind" | "returnedAmount" | "returnedDate"> {
+  if (str(r.kind).toLowerCase() !== "loan") return { kind: "gift", returnedAmount: 0, returnedDate: "" };
+  const returned = num(r.returned_amount) ?? 0;
+  return {
+    kind: "loan",
+    returnedAmount: Math.min(Math.max(returned, 0), amount),
+    returnedDate: parseDateCell(r.returned_date) ?? "",
+  };
+}
+
+function rowToDue(r: RawRecord): Due | null {
+  const dueDate = parseDateCell(r.due_date);
+  const amount = num(r.amount);
+  const recipient = recipientCell(r.recipient);
+  if (!dueDate || amount === null || !isRecipient(recipient)) {
+    console.warn("[repo] skipping invalid due row", r.due_id);
+    return null;
+  }
+  const repeatRaw = str(r.repeat).toLowerCase();
+  const repeat: DueRepeat = repeatRaw === "monthly" || repeatRaw === "yearly" ? repeatRaw : "none";
+  return {
+    id: str(r.due_id),
+    title: str(r.title),
+    recipient,
+    amount,
+    dueDate,
+    repeat,
     notes: str(r.notes),
     createdAt: str(r.created_at),
     updatedAt: str(r.updated_at),
@@ -218,6 +263,9 @@ function transactionRecord(input: TransactionInput): RawRecord {
     description: input.description,
     reason: input.reason,
     notes: input.notes,
+    kind: input.kind,
+    returned_amount: input.kind === "loan" ? input.returnedAmount : "",
+    returned_date: input.kind === "loan" ? input.returnedDate : "",
   };
 }
 
@@ -256,9 +304,62 @@ export function deleteTransaction(id: string): Promise<void> {
   });
 }
 
-/** Creates the Income, Transactions and Settings tabs (with headers) if they are missing. */
+/* ------------------------------------------------------------------ */
+/* Dues (upcoming / repeating payments)                                */
+/* ------------------------------------------------------------------ */
+
+export async function listDues(): Promise<Due[]> {
+  const table = await readTable(DUES_SCHEMA);
+  return table.rows
+    .map((r) => rowToDue(r.record))
+    .filter((x): x is Due => x !== null)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.createdAt.localeCompare(b.createdAt));
+}
+
+function dueRecord(input: DueInput): RawRecord {
+  return {
+    title: input.title,
+    recipient: input.recipient,
+    amount: input.amount,
+    due_date: input.dueDate,
+    repeat: input.repeat,
+    notes: input.notes,
+  };
+}
+
+export function createDue(input: DueInput): Promise<Due> {
+  return withWriteLock(async () => {
+    const table = await readTable(DUES_SCHEMA);
+    const ts = nowIso();
+    const due: Due = { id: newId("due"), ...input, createdAt: ts, updatedAt: ts };
+    await appendRecord(DUES_SCHEMA, table.headers, { due_id: due.id, ...dueRecord(input), created_at: ts, updated_at: ts });
+    return due;
+  });
+}
+
+export function updateDue(id: string, input: DueInput): Promise<Due> {
+  return withWriteLock(async () => {
+    const table = await readTable(DUES_SCHEMA);
+    const row = findRow(table, DUES_SCHEMA, id);
+    if (!row) throw notFound("Due not found. It may have been deleted.");
+    const ts = nowIso();
+    await updateRecord(DUES_SCHEMA, table.headers, row, { ...dueRecord(input), updated_at: ts });
+    return { id, ...input, createdAt: str(row.record.created_at), updatedAt: ts };
+  });
+}
+
+export function deleteDue(id: string): Promise<void> {
+  return withWriteLock(async () => {
+    const table = await readTable(DUES_SCHEMA);
+    const row = findRow(table, DUES_SCHEMA, id);
+    if (!row) throw notFound("Due not found. It may have already been deleted.");
+    await deleteRecordRow(DUES_SCHEMA, table.headers, row);
+  });
+}
+
+/** Creates the Income, Transactions, Dues and Settings tabs (with headers) if they are missing. */
 export async function ensureAllTables(): Promise<void> {
-  for (const schema of [INCOME_SCHEMA, TRANSACTION_SCHEMA, SETTINGS_SCHEMA]) await ensureTable(schema);
+  for (const schema of [INCOME_SCHEMA, TRANSACTION_SCHEMA, DUES_SCHEMA, SETTINGS_SCHEMA]) await ensureTable(schema);
 }
 
 /* ------------------------------------------------------------------ */

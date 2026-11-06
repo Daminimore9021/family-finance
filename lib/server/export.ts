@@ -44,6 +44,8 @@ const TX_COLUMNS: Section["columns"] = [
   { header: "Time", width: 10 },
   { header: "Recipient", width: 12 },
   { header: "Amount (INR)", width: 16, money: true },
+  { header: "Type", width: 8 },
+  { header: "Returned (INR)", width: 15, money: true },
   { header: "Description", width: 32 },
   { header: "Reason", width: 24 },
   { header: "Notes", width: 32 },
@@ -73,11 +75,22 @@ function isoToDate(iso: string): Date {
 }
 
 function txRows(txs: Transaction[]): CellValue[][] {
-  return txs.map((t) => [isoToDate(t.date), formatTime(t.time), t.recipient, t.amount, t.description, t.reason, t.notes]);
+  return txs.map((t) => [
+    isoToDate(t.date),
+    formatTime(t.time),
+    t.recipient,
+    t.amount,
+    t.kind === "loan" ? "Loan" : "Given",
+    t.kind === "loan" ? t.returnedAmount : null,
+    t.description,
+    t.reason,
+    t.notes,
+  ]);
 }
 
 function txTotal(txs: Transaction[]): CellValue[] {
-  return ["Total", "", `${txs.length} payments`, txs.reduce((a, t) => a + Math.round(t.amount * 100), 0) / 100, "", "", ""];
+  const paise = (pick: (t: Transaction) => number) => txs.reduce((a, t) => a + Math.round(pick(t) * 100), 0) / 100;
+  return ["Total", "", `${txs.length} payments`, paise((t) => t.amount), "", paise((t) => (t.kind === "loan" ? t.returnedAmount : 0)), "", "", ""];
 }
 
 function summaryRows(

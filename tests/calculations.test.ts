@@ -8,11 +8,15 @@ import {
   computeAllTimeSummary,
   computeMonthlySummary,
   computeYearlySummary,
+  daysBetween,
   filterTransactions,
+  loanSummary,
+  nextDueDate,
+  reasonBreakdown,
   sumAmounts,
   trailingMonths,
 } from "../lib/calculations";
-import { isValidISODate, validateIncomeInput, validateTransactionInput } from "../lib/validation";
+import { isValidISODate, validateDueInput, validateIncomeInput, validateTransactionInput } from "../lib/validation";
 import type { Income, Recipient, Transaction } from "../lib/types";
 
 let n = 0;
@@ -25,6 +29,9 @@ const tx = (recipient: Recipient, amount: number, date: string, description = ""
   description,
   reason: "",
   notes: "",
+  kind: "gift",
+  returnedAmount: 0,
+  returnedDate: "",
   createdAt: `2026-01-01T00:00:${String(n).padStart(2, "0")}Z`,
   updatedAt: "",
 });
@@ -128,4 +135,47 @@ test("a month can have several incomes (salary + freelancing) and they add up", 
   assert.equal(s.income, 62000.5);
   assert.equal(s.incomeRecords.length, 2);
   assert.equal(s.remaining, 60000);
+});
+
+test("loans: only the part not returned counts as given", () => {
+  const loan = { ...tx("Papa", 10000, "2026-10-24"), kind: "loan" as const, returnedAmount: 4000, returnedDate: "2026-11-01" };
+  const s = computeMonthlySummary([], [loan, tx("Papa", 500, "2026-10-02")], 2026, 10);
+  assert.equal(s.totals.Papa, 6500);
+  const l = loanSummary([loan]);
+  assert.deepEqual(l, { loanCount: 1, openCount: 1, lent: 10000, returned: 4000, pending: 6000 });
+  assert.equal(loanSummary([{ ...loan, returnedAmount: 10000 }]).openCount, 0);
+});
+
+test("reason breakdown groups case-insensitively and keeps blanks together", () => {
+  const list = [
+    { ...tx("Papa", 100, "2026-10-01"), reason: "Groceries" },
+    { ...tx("Papa", 250, "2026-10-02"), reason: "groceries " },
+    tx("Papa", 50, "2026-10-03"),
+  ];
+  const r = reasonBreakdown(list);
+  assert.deepEqual(r[0], { label: "Groceries", amount: 350, count: 2 });
+  assert.deepEqual(r[1], { label: "No reason", amount: 50, count: 1 });
+});
+
+test("next due date clamps the day and rolls the year", () => {
+  assert.equal(nextDueDate("2026-01-31", "monthly"), "2026-02-28");
+  assert.equal(nextDueDate("2026-12-15", "monthly"), "2027-01-15");
+  assert.equal(nextDueDate("2028-02-29", "yearly"), "2029-02-28");
+  assert.equal(nextDueDate("2026-05-10", "none"), "2026-05-10");
+  assert.equal(daysBetween("2026-11-07", "2026-11-10"), 3);
+  assert.equal(daysBetween("2026-11-07", "2026-10-31"), -7);
+});
+
+test("validation: loans and dues", () => {
+  const base = { recipient: "Papa", date: "2026-10-24", amount: "10000" };
+  const ok = validateTransactionInput({ ...base, kind: "loan", returnedAmount: "2500", returnedDate: "2026-11-01" });
+  assert.ok(ok.ok && ok.data.kind === "loan" && ok.data.returnedAmount === 2500);
+  const tooMuch = validateTransactionInput({ ...base, kind: "loan", returnedAmount: "20000" });
+  assert.ok(!tooMuch.ok && tooMuch.fields.returnedAmount);
+  const gift = validateTransactionInput({ ...base, returnedAmount: "500" });
+  assert.ok(gift.ok && gift.data.kind === "gift" && gift.data.returnedAmount === 0);
+  const due = validateDueInput({ title: "LIC", recipient: "Papa", amount: "12000", dueDate: "2027-02-12", repeat: "yearly" });
+  assert.ok(due.ok && due.data.repeat === "yearly");
+  const bad = validateDueInput({ recipient: "Papa", amount: "0", dueDate: "x", repeat: "weekly" });
+  assert.ok(!bad.ok && bad.fields.title && bad.fields.amount && bad.fields.dueDate && bad.fields.repeat);
 });

@@ -2,12 +2,14 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api-client";
-import { currentYearMonth } from "@/lib/format";
-import type { Income, IncomeInput, Transaction, TransactionInput } from "@/lib/types";
+import { nextDueDate } from "@/lib/calculations";
+import { currentYearMonth, todayISO } from "@/lib/format";
+import type { Due, DueInput, Income, IncomeInput, Transaction, TransactionInput } from "@/lib/types";
 
 interface DataContextValue {
   incomes: Income[];
   transactions: Transaction[];
+  dues: Due[];
   loading: boolean;
   refreshing: boolean;
   error: string | null;
@@ -19,6 +21,10 @@ interface DataContextValue {
   removeIncome: (id: string) => Promise<void>;
   saveTransaction: (input: TransactionInput, id?: string) => Promise<Transaction>;
   removeTransaction: (id: string) => Promise<void>;
+  saveDue: (input: DueInput, id?: string) => Promise<Due>;
+  removeDue: (id: string) => Promise<void>;
+  /** Records the due as a payment today, then moves a repeating due to its next date (or removes a one-off). */
+  payDue: (due: Due) => Promise<Transaction>;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -28,6 +34,7 @@ const PERIOD_KEY = "fft.period";
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const [incomes, setIncomes] = useState<Income[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [dues, setDues] = useState<Due[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,9 +62,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const [inc, txs] = await Promise.all([api<Income[]>("/api/income"), api<Transaction[]>("/api/transactions")]);
+      const [inc, txs, ds] = await Promise.all([
+        api<Income[]>("/api/income"),
+        api<Transaction[]>("/api/transactions"),
+        api<Due[]>("/api/dues"),
+      ]);
       setIncomes(inc);
       setTransactions(txs);
+      setDues(ds);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load data");
@@ -134,10 +146,54 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     [refresh],
   );
 
+  const saveDue = useCallback(
+    async (input: DueInput, id?: string) => {
+      const saved = id
+        ? await api<Due>(`/api/dues/${encodeURIComponent(id)}`, { method: "PUT", body: input })
+        : await api<Due>("/api/dues", { method: "POST", body: input });
+      setDues((list) => [saved, ...list.filter((d) => d.id !== saved.id)].sort((a, b) => a.dueDate.localeCompare(b.dueDate)));
+      void refresh();
+      return saved;
+    },
+    [refresh],
+  );
+
+  const removeDue = useCallback(
+    async (id: string) => {
+      await api(`/api/dues/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setDues((list) => list.filter((d) => d.id !== id));
+      void refresh();
+    },
+    [refresh],
+  );
+
+  const payDue = useCallback(
+    async (due: Due) => {
+      const tx = await saveTransaction({
+        date: todayISO(),
+        time: "",
+        recipient: due.recipient,
+        amount: due.amount,
+        description: "",
+        reason: due.title,
+        notes: due.notes,
+        kind: "gift",
+        returnedAmount: 0,
+        returnedDate: "",
+      });
+      const { id, createdAt: _c, updatedAt: _u, ...rest } = due;
+      if (due.repeat === "none") await removeDue(id);
+      else await saveDue({ ...rest, dueDate: nextDueDate(due.dueDate, due.repeat) }, id);
+      return tx;
+    },
+    [saveTransaction, saveDue, removeDue],
+  );
+
   const value = useMemo(
     () => ({
       incomes,
       transactions,
+      dues,
       loading,
       refreshing,
       error,
@@ -148,8 +204,28 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       removeIncome,
       saveTransaction,
       removeTransaction,
+      saveDue,
+      removeDue,
+      payDue,
     }),
-    [incomes, transactions, loading, refreshing, error, refresh, period, setPeriod, saveIncome, removeIncome, saveTransaction, removeTransaction],
+    [
+      incomes,
+      transactions,
+      dues,
+      loading,
+      refreshing,
+      error,
+      refresh,
+      period,
+      setPeriod,
+      saveIncome,
+      removeIncome,
+      saveTransaction,
+      removeTransaction,
+      saveDue,
+      removeDue,
+      payDue,
+    ],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

@@ -35,4 +35,17 @@ export const LIMITS = {
   description: 200,
   reason: 200,
   notes: 500,
+  title: 100,
 } as const;
+
+/** One-tap reasons on the payment form (recently used reasons are added too). */
+export const REASON_PRESETS = [
+  "Groceries",
+  "LIC installment",
+  "Gas cylinder refill",
+  "College fee",
+  "Medicine",
+  "Electricity bill",
+  "Rent",
+  "Travel",
+] as const;

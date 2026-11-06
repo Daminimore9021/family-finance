@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
-import { formatDate, formatINR, formatTime } from "@/lib/format";
+import { CircleCheck, Pencil, Trash2 } from "lucide-react";
+import { netAmount } from "@/lib/calculations";
+import { formatDate, formatINR, formatTime, todayISO } from "@/lib/format";
+import { cn } from "@/lib/api-client";
 import type { Transaction } from "@/lib/types";
 import { useData } from "./DataProvider";
 import { PaymentForm } from "./PaymentForm";
@@ -23,7 +25,7 @@ interface Props {
  * with edit (modal) and delete (confirmation) actions.
  */
 export function TransactionList({ transactions, readOnly, compact }: Props) {
-  const { removeTransaction } = useData();
+  const { removeTransaction, saveTransaction } = useData();
   const toast = useToast();
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState<Transaction | null>(null);
@@ -43,9 +45,33 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
     }
   }
 
+  async function markReturned(t: Transaction) {
+    setBusy(true);
+    try {
+      const { id, createdAt: _c, updatedAt: _u, ...input } = t;
+      await saveTransaction({ ...input, returnedAmount: t.amount, returnedDate: todayISO() }, id);
+      toast.success(`Loan to ${t.recipient} marked as returned`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update loan");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const actions = (t: Transaction) =>
     readOnly ? null : (
       <div className="flex shrink-0 items-center">
+        {t.kind === "loan" && netAmount(t) > 0 && (
+          <button
+            onClick={() => void markReturned(t)}
+            disabled={busy}
+            className="flex size-10 items-center justify-center rounded-full text-slate-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50"
+            aria-label={`Mark loan to ${t.recipient} on ${formatDate(t.date)} as returned`}
+            title="Mark as returned"
+          >
+            <CircleCheck className="size-4" />
+          </button>
+        )}
         <button
           onClick={() => setEditing(t)}
           className="flex size-10 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-brand-600"
@@ -80,6 +106,7 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
                 {t.time ? `, ${formatTime(t.time)}` : ""}
                 {t.reason && t.description ? ` · ${t.reason}` : ""}
               </p>
+              <LoanBadge t={t} />
               {t.notes && <p className="mt-0.5 line-clamp-2 break-words text-xs text-slate-400">{t.notes}</p>}
             </div>
             {actions(t)}
@@ -98,7 +125,7 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
                 <th className="w-32 py-2 pr-3 text-right font-medium">Amount</th>
                 <th className="py-2 pr-3 font-medium">Description</th>
                 <th className="py-2 pr-3 font-medium">Reason</th>
-                {!readOnly && <th className="w-24 py-2 text-right font-medium">Actions</th>}
+                {!readOnly && <th className="w-32 py-2 text-right font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -111,7 +138,10 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
                   <td className="py-3 pr-3">
                     <RecipientBadge recipient={t.recipient} />
                   </td>
-                  <td className="num py-3 pr-3 text-right font-semibold text-slate-900">{formatINR(t.amount)}</td>
+                  <td className="num py-3 pr-3 text-right font-semibold text-slate-900">
+                    {formatINR(t.amount)}
+                    <LoanBadge t={t} />
+                  </td>
                   <td className="py-3 pr-3 text-slate-700">
                     <p className="break-words">{t.description || <span className="text-slate-300">—</span>}</p>
                     {t.notes && <p className="mt-0.5 break-words text-xs text-slate-400">{t.notes}</p>}
@@ -147,5 +177,21 @@ export function TransactionList({ transactions, readOnly, compact }: Props) {
         }
       />
     </>
+  );
+}
+
+/** "Loan · ₹X to get back" or "Loan returned". Nothing for normal payments. */
+function LoanBadge({ t }: { t: Transaction }) {
+  if (t.kind !== "loan") return null;
+  const left = netAmount(t);
+  return (
+    <span
+      className={cn(
+        "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold",
+        left > 0 ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200" : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
+      )}
+    >
+      {left > 0 ? `Loan · ${formatINR(left)} to get back` : "Loan · returned"}
+    </span>
   );
 }
