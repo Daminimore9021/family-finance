@@ -10,6 +10,8 @@ import {
   ensureTable,
   findRow,
   readTable,
+  readTables,
+  type Table,
   updateRecord,
   withWriteLock,
   type Cell,
@@ -189,7 +191,10 @@ const nowIso = () => new Date().toISOString();
 /* ------------------------------------------------------------------ */
 
 export async function listIncome(): Promise<Income[]> {
-  const table = await readTable(INCOME_SCHEMA);
+  return incomesFrom(await readTable(INCOME_SCHEMA));
+}
+
+function incomesFrom(table: Table): Income[] {
   return table.rows
     .map((r) => rowToIncome(r.record))
     .filter((x): x is Income => x !== null)
@@ -247,7 +252,10 @@ export function deleteIncome(id: string): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 export async function listTransactions(): Promise<Transaction[]> {
-  const table = await readTable(TRANSACTION_SCHEMA);
+  return transactionsFrom(await readTable(TRANSACTION_SCHEMA));
+}
+
+function transactionsFrom(table: Table): Transaction[] {
   return table.rows
     .map((r) => rowToTransaction(r.record))
     .filter((x): x is Transaction => x !== null)
@@ -309,7 +317,16 @@ export function deleteTransaction(id: string): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 export async function listDues(): Promise<Due[]> {
-  const table = await readTable(DUES_SCHEMA);
+  return duesFrom(await readTable(DUES_SCHEMA));
+}
+
+/** Income, payments and dues in one Sheets API call — used for the app's data refresh. */
+export async function listEverything(): Promise<{ incomes: Income[]; transactions: Transaction[]; dues: Due[] }> {
+  const [inc, txs, dues] = await readTables([INCOME_SCHEMA, TRANSACTION_SCHEMA, DUES_SCHEMA]);
+  return { incomes: incomesFrom(inc), transactions: transactionsFrom(txs), dues: duesFrom(dues) };
+}
+
+function duesFrom(table: Table): Due[] {
   return table.rows
     .map((r) => rowToDue(r.record))
     .filter((x): x is Due => x !== null)

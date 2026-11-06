@@ -176,7 +176,20 @@ export async function readTable(schema: TableSchema): Promise<Table> {
   const res = await sheetsRequest<{ values?: Cell[][] }>(
     `/values/${a1(schema.title)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
   );
-  const values = res.values ?? [];
+  return toTable(schema, res.values ?? []);
+}
+
+/** Reads several tabs with a single Sheets API call (saves read quota). */
+export async function readTables(schemas: TableSchema[]): Promise<Table[]> {
+  for (const schema of schemas) await ensureTable(schema);
+  const ranges = schemas.map((s) => `ranges=${a1(s.title)}`).join("&");
+  const res = await sheetsRequest<{ valueRanges?: { values?: Cell[][] }[] }>(
+    `/values:batchGet?${ranges}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
+  );
+  return schemas.map((s, i) => toTable(s, res.valueRanges?.[i]?.values ?? []));
+}
+
+function toTable(schema: TableSchema, values: Cell[][]): Table {
   const headers = (values[0] ?? []).map((h) => String(h).trim());
   const rows: TableRow[] = [];
   for (let i = 1; i < values.length; i++) {

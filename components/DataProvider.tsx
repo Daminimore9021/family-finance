@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api-client";
 import { nextDueDate } from "@/lib/calculations";
 import { currentYearMonth, todayISO } from "@/lib/format";
@@ -59,17 +59,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /** Re-reads everything from Google Sheets so all figures reflect the source of truth. */
+  const lastRefresh = useRef(0);
   const refresh = useCallback(async () => {
+    lastRefresh.current = Date.now();
     setRefreshing(true);
     try {
-      const [inc, txs, ds] = await Promise.all([
-        api<Income[]>("/api/income"),
-        api<Transaction[]>("/api/transactions"),
-        api<Due[]>("/api/dues"),
-      ]);
-      setIncomes(inc);
-      setTransactions(txs);
-      setDues(ds);
+      // One request → one Google Sheets read (keeps us well under Google's per-minute limit).
+      const all = await api<{ incomes: Income[]; transactions: Transaction[]; dues: Due[] }>("/api/data");
+      setIncomes(all.incomes);
+      setTransactions(all.transactions);
+      setDues(all.dues);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load data");
@@ -83,13 +82,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  // Keep figures live: re-read the sheet when the app comes back into view and
-  // every 30 seconds while it is visible (picks up entries made on other devices
-  // or typed straight into the sheet).
+  // Keep figures live: re-read the sheet when the app comes back into view (at most
+  // every 30 s) and every 2 minutes while it stays open, so entries made on other
+  // devices show up without hammering Google's read limit.
   useEffect(() => {
     const visible = () => document.visibilityState === "visible";
-    const onShow = () => visible() && void refresh();
-    const timer = window.setInterval(onShow, 30_000);
+    const onShow = () => {
+      if (visible() && Date.now() - lastRefresh.current > 30_000) void refresh();
+    };
+    const timer = window.setInterval(() => visible() && void refresh(), 120_000);
     document.addEventListener("visibilitychange", onShow);
     window.addEventListener("focus", onShow);
     return () => {
